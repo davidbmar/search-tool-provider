@@ -20,7 +20,7 @@ bing = []
 duckduckgo = ["duckduckgo-search>=6.0"]
 google = ["google-api-python-client>=2.100"]
 mcp = ["mcp[cli]>=1.0"]
-admin = ["fastapi>=0.100", "uvicorn>=0.20", "jinja2>=3.1", "python-multipart>=0.0.6"]
+admin = ["fastapi>=0.100", "uvicorn>=0.20", "jinja2>=3.1", "python-multipart>=0.0.6", "python-dotenv>=1.0"]
 cli = ["rich>=13.0"]
 all = [
     "search-tool-provider[duckduckgo,google,mcp,admin,cli]",

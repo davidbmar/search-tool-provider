@@ -54,7 +54,7 @@ async function runHealthCheck() {
     container.appendChild(checking);
 
     try {
-        var resp = await fetch('/api/health-check');
+        var resp = await fetch('/api/health-check', {cache: 'no-store'});
         var data = await resp.json();
         while (container.firstChild) container.removeChild(container.firstChild);
 

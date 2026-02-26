@@ -7,14 +7,34 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from ..provider import SearchProvider
 
+# Auto-load .env — try project root (relative to this file), then cwd
 _DIR = Path(__file__).parent
+_PROJECT_ROOT = _DIR.parent.parent.parent  # admin → search_tool_provider → src → root
+
+import logging
+_log = logging.getLogger("search_tool_provider.admin")
+
+_env_loaded = False
+try:
+    from dotenv import load_dotenv
+    # Try project root first, then working directory
+    for _candidate in [_PROJECT_ROOT / ".env", Path.cwd() / ".env"]:
+        if _candidate.exists():
+            load_dotenv(_candidate)
+            _env_loaded = True
+            _log.info("Loaded .env from %s", _candidate)
+            break
+    if not _env_loaded:
+        _log.info("No .env found (checked %s and cwd)", _PROJECT_ROOT)
+except ImportError:
+    _log.info("python-dotenv not installed — skipping .env load")
 app = FastAPI(title="search-tool-provider admin")
 app.mount("/static", StaticFiles(directory=_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=_DIR / "templates")
@@ -26,6 +46,12 @@ _provider_name: str = ""
 # ── Models ──────────────────────────────────────────────────────
 
 class ConnectionRequest(BaseModel):
+    provider: str
+    api_key: str = ""
+    cx: str = ""
+
+
+class SaveConfigRequest(BaseModel):
     provider: str
     api_key: str = ""
     cx: str = ""
@@ -238,7 +264,42 @@ async def api_health_check():
             }
 
     pinged = list(await asyncio.gather(*[_check_one(n, p) for n, p in to_ping]))
-    return {"providers": pinged + unconfigured}
+    return JSONResponse(
+        content={"providers": pinged + unconfigured},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/save-config")
+async def api_save_config(req: SaveConfigRequest):
+    """Merge provider config into .env and load into current process."""
+    from .env_writer import merge_env_file
+
+    env_path = Path.cwd() / ".env"
+    updates: dict[str, str] = {"SEARCH_PROVIDER": req.provider}
+
+    # Map provider → env var names (only include keys with values)
+    _PROVIDER_ENV = {
+        "tavily": [("TAVILY_API_KEY", "api_key")],
+        "brave": [("BRAVE_API_KEY", "api_key")],
+        "serper": [("SERPER_API_KEY", "api_key")],
+        "bing": [("BING_API_KEY", "api_key")],
+        "google_cse": [("GOOGLE_CSE_API_KEY", "api_key"), ("GOOGLE_CSE_CX", "cx")],
+    }
+
+    for env_var, attr in _PROVIDER_ENV.get(req.provider, []):
+        value = getattr(req, attr, "")
+        if value:
+            updates[env_var] = value
+
+    try:
+        written = merge_env_file(env_path, updates)
+        # Load into current process so health panel picks up immediately
+        for key, value in updates.items():
+            os.environ[key] = value
+        return {"success": True, "path": str(written), "keys": list(updates.keys())}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
 
 
 # ── Helpers ─────────────────────────────────────────────────────
@@ -290,8 +351,32 @@ def _get_env_status() -> dict:
     }
 
 
+def _kill_stale_server(port: int) -> None:
+    """Kill any process already listening on *port* so we don't get EADDRINUSE."""
+    import signal
+    import subprocess
+
+    try:
+        pids = subprocess.check_output(
+            ["lsof", "-ti", f":{port}"], text=True
+        ).strip()
+        if pids:
+            for pid in pids.splitlines():
+                pid = int(pid)
+                if pid != os.getpid():
+                    os.kill(pid, signal.SIGTERM)
+                    _log.info("Killed stale process %d on port %d", pid, port)
+    except (subprocess.CalledProcessError, OSError):
+        pass  # No process on port — normal case
+
+
 def main() -> None:
     import uvicorn
 
+    logging.basicConfig(level=logging.INFO)
+    env_status = _get_env_status()
+    active = [k for k, v in env_status.items() if v]
+    _log.info("API keys loaded: %s", active if active else "none")
     port = int(os.environ.get("SEARCH_PROVIDER_ADMIN_PORT", "8200"))
+    _kill_stale_server(port)
     uvicorn.run(app, host="0.0.0.0", port=port)

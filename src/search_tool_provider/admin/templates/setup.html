@@ -104,6 +104,10 @@
             <pre><code id="config-cursor"></code></pre>
         </div>
         <div class="mt-2">
+            <button class="btn btn-primary" onclick="saveEnvFile()" id="btn-save-env">Save .env</button>
+        </div>
+        <div id="save-result" class="mt-2"></div>
+        <div class="mt-2">
             <button class="btn btn-secondary" onclick="goToStep(3)">Back</button>
             <a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
         </div>
@@ -220,7 +224,7 @@ async function testConnection() {
             alert.className = 'alert alert-success';
             alert.textContent = 'Connected! Provider: ' + data.provider;
             resultDiv.appendChild(alert);
-            goToStep(3);
+            setTimeout(function() { goToStep(3); }, 800);
         } else {
             alert.className = 'alert alert-error';
             alert.textContent = data.error || 'Connection failed';
@@ -326,6 +330,45 @@ function generateConfig() {
         }
     };
     document.getElementById('config-cursor').textContent = JSON.stringify(cursor, null, 2);
+}
+
+async function saveEnvFile() {
+    var btn = document.getElementById('btn-save-env');
+    var resultDiv = document.getElementById('save-result');
+    while (resultDiv.firstChild) resultDiv.removeChild(resultDiv.firstChild);
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    var payload = {provider: selectedProvider};
+    var fields = CRED_FIELDS[selectedProvider] || [];
+    fields.forEach(function(f) {
+        payload[f.key] = providerConfig[f.key] || '';
+    });
+
+    try {
+        var resp = await fetch('/api/save-config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        var data = await resp.json();
+        var alert = document.createElement('div');
+        if (data.success) {
+            alert.className = 'alert alert-success';
+            alert.textContent = 'Saved to ' + data.path + ' (' + data.keys.join(', ') + ')';
+        } else {
+            alert.className = 'alert alert-error';
+            alert.textContent = data.error || 'Failed to save';
+        }
+        resultDiv.appendChild(alert);
+    } catch (e) {
+        var errAlert = document.createElement('div');
+        errAlert.className = 'alert alert-error';
+        errAlert.textContent = 'Request failed: ' + e.message;
+        resultDiv.appendChild(errAlert);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Save .env';
 }
 
 function switchTab(el, id) {
