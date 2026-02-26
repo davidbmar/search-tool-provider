@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+{% block title %}Setup — search-tool-provider{% endblock %}
+{% block content %}
+<div class="container">
+    <div class="steps mt-2">
+        <div class="step active" id="step-ind-1">1. Choose Provider</div>
+        <div class="step" id="step-ind-2">2. Credentials</div>
+        <div class="step" id="step-ind-3">3. Test Search</div>
+        <div class="step" id="step-ind-4">4. Config</div>
+    </div>
+
+    <!-- Step 1: Choose Provider -->
+    <div id="step-1">
+        <h2 class="mb-2">Choose Your Search Backend</h2>
+        <div id="provider-list">
+            <div class="provider-option" data-provider="duckduckgo" onclick="selectProvider(this)">
+                <span class="name">DuckDuckGo</span>
+                <span class="tag tag-free">Free</span>
+                <div class="desc">Free, no API key. Great for testing and prototypes. Rate limited — not for production.</div>
+                <div class="best-for">Best for: Getting started, development, fallback</div>
+            </div>
+            <div class="provider-option" data-provider="tavily" onclick="selectProvider(this)">
+                <span class="name">Tavily</span>
+                <span class="tag tag-freemium">1,000 free/mo</span>
+                <div class="desc">Built for AI agents. Returns direct answers + relevance scores. Best structured results for LLMs.</div>
+                <div class="best-for">Best for: AI tools that need concise answers</div>
+            </div>
+            <div class="provider-option" data-provider="brave" onclick="selectProvider(this)">
+                <span class="name">Brave Search</span>
+                <span class="tag tag-freemium">2,000 free/mo</span>
+                <div class="desc">Privacy-focused. Rich infoboxes with structured data. Dedicated news endpoint.</div>
+                <div class="best-for">Best for: General search with structured data</div>
+            </div>
+            <div class="provider-option" data-provider="serper" onclick="selectProvider(this)">
+                <span class="name">Serper (Google Results)</span>
+                <span class="tag tag-freemium">2,500 free/mo</span>
+                <div class="desc">Google SERP data including knowledge graph, answer box, and organic results.</div>
+                <div class="best-for">Best for: When you need Google-quality results</div>
+            </div>
+            <div class="provider-option" data-provider="google_cse" onclick="selectProvider(this)">
+                <span class="name">Google Custom Search</span>
+                <span class="tag tag-freemium">100 free/day</span>
+                <div class="desc">Official Google API. Requires creating a Custom Search Engine. Can scope to specific sites.</div>
+                <div class="best-for">Best for: Custom search scopes (specific sites)</div>
+            </div>
+            <div class="provider-option" data-provider="bing" onclick="selectProvider(this)">
+                <span class="name">Bing Web Search</span>
+                <span class="tag tag-freemium">1,000 free/mo</span>
+                <div class="desc">Microsoft's search API. Azure subscription needed. Dedicated news endpoint.</div>
+                <div class="best-for">Best for: Enterprise / Azure environments</div>
+            </div>
+            <div class="provider-option" data-provider="fallback" onclick="selectProvider(this)">
+                <span class="name">Auto (Fallback Chain)</span>
+                <span class="tag tag-free">Smart</span>
+                <div class="desc">Uses all your configured keys in priority order. If one fails, falls back to the next.</div>
+                <div class="best-for">Best for: Production reliability</div>
+            </div>
+        </div>
+        <div class="mt-2">
+            <button class="btn btn-primary" onclick="goToStep(2)" id="btn-step1-next" disabled>Next</button>
+        </div>
+    </div>
+
+    <!-- Step 2: Credentials -->
+    <div id="step-2" class="hidden">
+        <h2 class="mb-2">Configure Credentials</h2>
+        <div id="cred-form"></div>
+        <div class="mt-2">
+            <button class="btn btn-secondary" onclick="goToStep(1)">Back</button>
+            <button class="btn btn-primary" onclick="testConnection()" id="btn-test">Test Connection</button>
+        </div>
+        <div id="test-result" class="mt-2"></div>
+    </div>
+
+    <!-- Step 3: Test Search -->
+    <div id="step-3" class="hidden">
+        <h2 class="mb-2">Test Search</h2>
+        <p class="text-dim mb-2">Run a sample query to verify everything works.</p>
+        <input type="text" id="test-query" value="python programming" placeholder="Enter a test query">
+        <button class="btn btn-primary" onclick="runTestSearch()">Search</button>
+        <div id="test-search-results" class="mt-2"></div>
+        <div class="mt-2">
+            <button class="btn btn-secondary" onclick="goToStep(2)">Back</button>
+            <button class="btn btn-primary" onclick="goToStep(4)">Next</button>
+        </div>
+    </div>
+
+    <!-- Step 4: Config -->
+    <div id="step-4" class="hidden">
+        <h2 class="mb-2">Generated Configuration</h2>
+        <p class="text-dim mb-2">Copy these into your project to use the configured provider.</p>
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab(this, 'tab-env')">.env</div>
+            <div class="tab" onclick="switchTab(this, 'tab-claude')">Claude Code</div>
+            <div class="tab" onclick="switchTab(this, 'tab-cursor')">Cursor</div>
+        </div>
+        <div id="tab-env" class="tab-content active card" style="border-radius: 0 var(--radius) var(--radius) var(--radius);">
+            <pre><code id="config-env"></code></pre>
+        </div>
+        <div id="tab-claude" class="tab-content card" style="border-radius: 0 var(--radius) var(--radius) var(--radius);">
+            <pre><code id="config-claude"></code></pre>
+        </div>
+        <div id="tab-cursor" class="tab-content card" style="border-radius: 0 var(--radius) var(--radius) var(--radius);">
+            <pre><code id="config-cursor"></code></pre>
+        </div>
+        <div class="mt-2">
+            <button class="btn btn-secondary" onclick="goToStep(3)">Back</button>
+            <a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let selectedProvider = null;
+let providerConfig = {};
+
+const CRED_FIELDS = {
+    duckduckgo: [],
+    tavily: [{key: 'api_key', label: 'Tavily API Key', env: 'TAVILY_API_KEY', link: 'https://tavily.com', hint: 'Sign up at tavily.com — 1,000 free searches/month'}],
+    brave: [{key: 'api_key', label: 'Brave API Key', env: 'BRAVE_API_KEY', link: 'https://brave.com/search/api/', hint: 'Get a key at brave.com/search/api — 2,000 free queries/month'}],
+    serper: [{key: 'api_key', label: 'Serper API Key', env: 'SERPER_API_KEY', link: 'https://serper.dev', hint: 'Sign up at serper.dev — 2,500 free queries/month'}],
+    google_cse: [
+        {key: 'api_key', label: 'Google API Key', env: 'GOOGLE_CSE_API_KEY', link: 'https://console.cloud.google.com/apis/credentials', hint: 'Create in Google Cloud Console'},
+        {key: 'cx', label: 'Custom Search Engine ID', env: 'GOOGLE_CSE_CX', link: 'https://programmablesearchengine.google.com/', hint: 'Create a search engine at programmablesearchengine.google.com'}
+    ],
+    bing: [{key: 'api_key', label: 'Bing Subscription Key', env: 'BING_API_KEY', link: 'https://portal.azure.com', hint: 'Create Bing Search resource in Azure Portal — 1,000 free transactions/month'}],
+    fallback: []
+};
+
+function selectProvider(el) {
+    document.querySelectorAll('.provider-option').forEach(function(e) { e.classList.remove('selected'); });
+    el.classList.add('selected');
+    selectedProvider = el.dataset.provider;
+    document.getElementById('btn-step1-next').disabled = false;
+}
+
+function goToStep(n) {
+    for (var i = 1; i <= 4; i++) {
+        document.getElementById('step-' + i).classList.toggle('hidden', i !== n);
+        var ind = document.getElementById('step-ind-' + i);
+        ind.classList.toggle('active', i === n);
+        ind.classList.toggle('done', i < n);
+    }
+    if (n === 2) buildCredForm();
+    if (n === 4) generateConfig();
+}
+
+function buildCredForm() {
+    var fields = CRED_FIELDS[selectedProvider] || [];
+    var form = document.getElementById('cred-form');
+    // Clear existing children safely
+    while (form.firstChild) form.removeChild(form.firstChild);
+
+    if (fields.length === 0) {
+        var info = document.createElement('div');
+        info.className = 'alert alert-info';
+        info.textContent = 'No API key needed — click Test Connection to continue.';
+        form.appendChild(info);
+        return;
+    }
+
+    fields.forEach(function(f) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'mb-2';
+
+        var label = document.createElement('label');
+        label.textContent = f.label;
+        wrapper.appendChild(label);
+
+        var input = document.createElement('input');
+        input.type = 'password';
+        input.id = 'cred-' + f.key;
+        input.placeholder = f.env;
+        input.value = providerConfig[f.key] || '';
+        wrapper.appendChild(input);
+
+        var hint = document.createElement('div');
+        hint.className = 'text-dim';
+        hint.style.fontSize = '0.8rem';
+        hint.style.marginTop = '-0.5rem';
+        hint.textContent = f.hint + '. ';
+        var link = document.createElement('a');
+        link.href = f.link;
+        link.target = '_blank';
+        link.style.color = 'var(--accent)';
+        link.textContent = 'Get key \u2192';
+        hint.appendChild(link);
+        wrapper.appendChild(hint);
+
+        form.appendChild(wrapper);
+    });
+}
+
+async function testConnection() {
+    var fields = CRED_FIELDS[selectedProvider] || [];
+    var creds = {provider: selectedProvider};
+    fields.forEach(function(f) {
+        creds[f.key] = document.getElementById('cred-' + f.key).value;
+    });
+    providerConfig = creds;
+
+    var resultDiv = document.getElementById('test-result');
+    while (resultDiv.firstChild) resultDiv.removeChild(resultDiv.firstChild);
+    var spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    resultDiv.appendChild(spinner);
+    resultDiv.appendChild(document.createTextNode(' Testing connection...'));
+
+    try {
+        var resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(creds)
+        });
+        var data = await resp.json();
+        while (resultDiv.firstChild) resultDiv.removeChild(resultDiv.firstChild);
+        var alert = document.createElement('div');
+        if (data.success) {
+            alert.className = 'alert alert-success';
+            alert.textContent = 'Connected! Provider: ' + data.provider;
+            resultDiv.appendChild(alert);
+            goToStep(3);
+        } else {
+            alert.className = 'alert alert-error';
+            alert.textContent = data.error || 'Connection failed';
+            resultDiv.appendChild(alert);
+        }
+    } catch (e) {
+        while (resultDiv.firstChild) resultDiv.removeChild(resultDiv.firstChild);
+        var errAlert = document.createElement('div');
+        errAlert.className = 'alert alert-error';
+        errAlert.textContent = 'Request failed: ' + e.message;
+        resultDiv.appendChild(errAlert);
+    }
+}
+
+async function runTestSearch() {
+    var query = document.getElementById('test-query').value;
+    var div = document.getElementById('test-search-results');
+    while (div.firstChild) div.removeChild(div.firstChild);
+    var spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    div.appendChild(spinner);
+    div.appendChild(document.createTextNode(' Searching...'));
+
+    try {
+        var resp = await fetch('/api/search?q=' + encodeURIComponent(query));
+        var data = await resp.json();
+        while (div.firstChild) div.removeChild(div.firstChild);
+
+        if (data.results && data.results.length > 0) {
+            var card = document.createElement('div');
+            card.className = 'card';
+            data.results.forEach(function(r, i) {
+                var item = document.createElement('div');
+                item.className = 'result-item';
+
+                var title = document.createElement('div');
+                title.className = 'result-title';
+                title.textContent = (i+1) + '. ' + r.title;
+                item.appendChild(title);
+
+                var url = document.createElement('div');
+                url.className = 'result-url';
+                url.textContent = r.url;
+                item.appendChild(url);
+
+                var snippet = document.createElement('div');
+                snippet.className = 'result-snippet';
+                snippet.textContent = r.snippet;
+                item.appendChild(snippet);
+
+                var score = document.createElement('div');
+                score.className = 'result-score';
+                score.textContent = 'Score: ' + r.score.toFixed(2);
+                item.appendChild(score);
+
+                card.appendChild(item);
+            });
+            div.appendChild(card);
+        } else {
+            var info = document.createElement('div');
+            info.className = 'alert alert-info';
+            info.textContent = 'No results found.';
+            div.appendChild(info);
+        }
+    } catch (e) {
+        while (div.firstChild) div.removeChild(div.firstChild);
+        var errDiv = document.createElement('div');
+        errDiv.className = 'alert alert-error';
+        errDiv.textContent = 'Search failed: ' + e.message;
+        div.appendChild(errDiv);
+    }
+}
+
+function generateConfig() {
+    var fields = CRED_FIELDS[selectedProvider] || [];
+    // .env
+    var envLines = ['# search-tool-provider configuration', 'SEARCH_PROVIDER=' + selectedProvider];
+    fields.forEach(function(f) {
+        envLines.push(f.env + '=' + (providerConfig[f.key] || 'your-key-here'));
+    });
+    document.getElementById('config-env').textContent = envLines.join('\n');
+
+    // Claude Code settings.json
+    var envObj = {SEARCH_PROVIDER: selectedProvider};
+    fields.forEach(function(f) { envObj[f.env] = providerConfig[f.key] || 'your-key-here'; });
+    var claude = {
+        mcpServers: {
+            "search-tool-provider": {
+                command: "search-provider-mcp",
+                env: envObj
+            }
+        }
+    };
+    document.getElementById('config-claude').textContent = JSON.stringify(claude, null, 2);
+
+    // Cursor mcp.json
+    var cursor = {
+        mcpServers: {
+            "search-tool-provider": {
+                command: "search-provider-mcp",
+                env: envObj
+            }
+        }
+    };
+    document.getElementById('config-cursor').textContent = JSON.stringify(cursor, null, 2);
+}
+
+function switchTab(el, id) {
+    el.parentElement.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+    el.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById(id).classList.add('active');
+}
+</script>
+{% endblock %}

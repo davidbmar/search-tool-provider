@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "search-tool-provider"
+version = "0.1.0"
+description = "Unified async web search across multiple backends with MCP server, CLI, and admin UI"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "David Mar" }]
+dependencies = ["httpx>=0.24"]
+
+[project.optional-dependencies]
+tavily = []
+brave = []
+serper = []
+bing = []
+duckduckgo = ["duckduckgo-search>=6.0"]
+google = ["google-api-python-client>=2.100"]
+mcp = ["mcp[cli]>=1.0"]
+admin = ["fastapi>=0.100", "uvicorn>=0.20", "jinja2>=3.1", "python-multipart>=0.0.6"]
+cli = ["rich>=13.0"]
+all = [
+    "search-tool-provider[duckduckgo,google,mcp,admin,cli]",
+]
+
+[project.scripts]
+search-provider-cli = "search_tool_provider.cli.app:main"
+search-provider-mcp = "search_tool_provider.mcp.server:main"
+search-provider-admin = "search_tool_provider.admin.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

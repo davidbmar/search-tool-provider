@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — search-tool-provider{% endblock %}
+{% block content %}
+<div class="container-wide">
+    <h2 class="mt-2 mb-2">Search Playground</h2>
+
+    <div class="card">
+        <div style="display:flex; gap:0.5rem;">
+            <input type="text" id="search-input" placeholder="Enter a search query..." style="margin-bottom:0; flex:1;">
+            <button class="btn btn-primary" onclick="doSearch()">Search</button>
+        </div>
+    </div>
+
+    <!-- Provider Info -->
+    <div id="provider-info" class="card mt-1">
+        <div class="text-dim">Loading provider info...</div>
+    </div>
+
+    <!-- Search Results -->
+    <div id="search-results" class="mt-1"></div>
+
+    <!-- Provider Comparison -->
+    <h2 class="mt-3 mb-2">Provider Comparison</h2>
+    <div class="card">
+        <div style="display:flex; gap:0.5rem;">
+            <input type="text" id="compare-input" placeholder="Compare query across providers..." style="margin-bottom:0; flex:1;">
+            <button class="btn btn-secondary" onclick="doCompare()">Compare</button>
+        </div>
+    </div>
+    <div id="compare-results" class="mt-1"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', loadProviderInfo);
+
+async function loadProviderInfo() {
+    var div = document.getElementById('provider-info');
+    try {
+        var resp = await fetch('/api/status');
+        var data = await resp.json();
+        while (div.firstChild) div.removeChild(div.firstChild);
+
+        var title = document.createElement('h3');
+        title.textContent = 'Provider: ' + data.provider;
+        div.appendChild(title);
+
+        var details = document.createElement('div');
+        details.className = 'text-dim';
+        details.textContent = 'Features: ' + (data.features || []).join(', ');
+        div.appendChild(details);
+
+        if (data.rate_limit_remaining !== null && data.rate_limit_remaining !== undefined) {
+            var rl = document.createElement('div');
+            rl.className = 'text-dim mt-1';
+            rl.textContent = 'Rate limit remaining: ' + data.rate_limit_remaining;
+            div.appendChild(rl);
+        }
+    } catch (e) {
+        while (div.firstChild) div.removeChild(div.firstChild);
+        var err = document.createElement('div');
+        err.className = 'alert alert-error';
+        err.textContent = 'Failed to load provider info';
+        div.appendChild(err);
+    }
+}
+
+async function doSearch() {
+    var query = document.getElementById('search-input').value;
+    if (!query) return;
+    var div = document.getElementById('search-results');
+    while (div.firstChild) div.removeChild(div.firstChild);
+    var spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    div.appendChild(spinner);
+    div.appendChild(document.createTextNode(' Searching...'));
+
+    try {
+        var resp = await fetch('/api/search?q=' + encodeURIComponent(query));
+        var data = await resp.json();
+        while (div.firstChild) div.removeChild(div.firstChild);
+
+        if (data.answer) {
+            var answerCard = document.createElement('div');
+            answerCard.className = 'card';
+            var ah = document.createElement('h3');
+            ah.textContent = 'Direct Answer';
+            answerCard.appendChild(ah);
+            var ap = document.createElement('p');
+            ap.textContent = data.answer;
+            answerCard.appendChild(ap);
+            div.appendChild(answerCard);
+        }
+
+        if (data.results && data.results.length > 0) {
+            var card = document.createElement('div');
+            card.className = 'card';
+            data.results.forEach(function(r, i) {
+                var item = document.createElement('div');
+                item.className = 'result-item';
+
+                var title = document.createElement('div');
+                title.className = 'result-title';
+                title.textContent = (i+1) + '. ' + r.title;
+                item.appendChild(title);
+
+                var url = document.createElement('div');
+                url.className = 'result-url';
+                url.textContent = r.url;
+                item.appendChild(url);
+
+                var snippet = document.createElement('div');
+                snippet.className = 'result-snippet';
+                snippet.textContent = r.snippet;
+                item.appendChild(snippet);
+
+                var score = document.createElement('div');
+                score.className = 'result-score';
+                score.textContent = 'Score: ' + r.score.toFixed(2);
+                item.appendChild(score);
+
+                card.appendChild(item);
+            });
+            div.appendChild(card);
+        } else {
+            var noRes = document.createElement('div');
+            noRes.className = 'alert alert-info';
+            noRes.textContent = 'No results found.';
+            div.appendChild(noRes);
+        }
+    } catch (e) {
+        while (div.firstChild) div.removeChild(div.firstChild);
+        var errDiv = document.createElement('div');
+        errDiv.className = 'alert alert-error';
+        errDiv.textContent = 'Search failed: ' + e.message;
+        div.appendChild(errDiv);
+    }
+}
+
+async function doCompare() {
+    var query = document.getElementById('compare-input').value;
+    if (!query) return;
+    var div = document.getElementById('compare-results');
+    while (div.firstChild) div.removeChild(div.firstChild);
+    var spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    div.appendChild(spinner);
+    div.appendChild(document.createTextNode(' Comparing across providers...'));
+
+    try {
+        var resp = await fetch('/api/compare?q=' + encodeURIComponent(query));
+        var data = await resp.json();
+        while (div.firstChild) div.removeChild(div.firstChild);
+
+        if (data.comparisons) {
+            var grid = document.createElement('div');
+            grid.className = 'grid-2';
+            data.comparisons.forEach(function(c) {
+                var card = document.createElement('div');
+                card.className = 'card';
+
+                var h = document.createElement('h3');
+                h.textContent = c.provider;
+                card.appendChild(h);
+
+                if (c.error) {
+                    var errDiv = document.createElement('div');
+                    errDiv.className = 'alert alert-error';
+                    errDiv.textContent = c.error;
+                    card.appendChild(errDiv);
+                } else if (c.results && c.results.length > 0) {
+                    c.results.slice(0, 3).forEach(function(r) {
+                        var item = document.createElement('div');
+                        item.className = 'result-item';
+
+                        var title = document.createElement('div');
+                        title.className = 'result-title';
+                        title.textContent = r.title;
+                        item.appendChild(title);
+
+                        var url = document.createElement('div');
+                        url.className = 'result-url';
+                        url.textContent = r.url;
+                        item.appendChild(url);
+
+                        card.appendChild(item);
+                    });
+                } else {
+                    var noRes = document.createElement('div');
+                    noRes.className = 'text-dim';
+                    noRes.textContent = 'No results';
+                    card.appendChild(noRes);
+                }
+                grid.appendChild(card);
+            });
+            div.appendChild(grid);
+        }
+    } catch (e) {
+        while (div.firstChild) div.removeChild(div.firstChild);
+        var errDiv = document.createElement('div');
+        errDiv.className = 'alert alert-error';
+        errDiv.textContent = 'Compare failed: ' + e.message;
+        div.appendChild(errDiv);
+    }
+}
+
+// Enter key to search
+document.getElementById('search-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') doSearch();
+});
+document.getElementById('compare-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') doCompare();
+});
+</script>
+{% endblock %}

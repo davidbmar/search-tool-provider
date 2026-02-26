@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}search-tool-provider{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>search-tool-provider</h1>
+        <nav>
+            <a href="/setup" class="{% if active == 'setup' %}active{% endif %}">Setup</a>
+            <a href="/dashboard" class="{% if active == 'dashboard' %}active{% endif %}">Dashboard</a>
+            <a href="/config" class="{% if active == 'config' %}active{% endif %}">Config</a>
+        </nav>
+    </header>
+    {% block content %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>
