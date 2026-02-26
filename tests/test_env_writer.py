@@ -115,6 +115,30 @@ class TestMergeEnvFile:
         assert env.exists()
         assert env.read_text() == "KEY=val\n"
 
+    def test_quotes_values_with_special_chars(self, tmp_path: Path):
+        """Values with spaces, #, or quotes get double-quoted."""
+        env = tmp_path / ".env"
+        merge_env_file(env, {
+            "PLAIN": "simple",
+            "HAS_SPACE": "hello world",
+            "HAS_HASH": "before#after",
+            "HAS_QUOTE": 'say "hi"',
+        })
+
+        text = env.read_text()
+        assert "PLAIN=simple\n" in text
+        assert 'HAS_SPACE="hello world"\n' in text
+        assert 'HAS_HASH="before#after"\n' in text
+        assert 'HAS_QUOTE="say \\"hi\\""\n' in text
+
+    def test_atomic_write_leaves_no_temp_on_success(self, tmp_path: Path):
+        """After a successful merge, no .env.*.tmp files should remain."""
+        env = tmp_path / ".env"
+        merge_env_file(env, {"KEY": "val"})
+
+        temps = list(tmp_path.glob(".env.*.tmp"))
+        assert temps == [], f"Leftover temp files: {temps}"
+
     def test_no_trailing_newline_in_existing(self, tmp_path: Path):
         """Appending to a file that doesn't end with newline."""
         env = tmp_path / ".env"
@@ -125,5 +149,7 @@ class TestMergeEnvFile:
         text = env.read_text()
         assert "EXISTING=yes" in text
         assert "NEW_KEY=added" in text
-        # Ensure they're on separate lines
-        assert "EXISTING=yes\nNEW_KEY=added" not in text or "\n" in text
+        # Ensure they're on separate lines (not concatenated)
+        lines = text.splitlines()
+        assert "EXISTING=yes" in lines
+        assert "NEW_KEY=added" in lines

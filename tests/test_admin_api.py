@@ -133,7 +133,7 @@ class TestSaveConfig:
         env_path = tmp_path / ".env"
 
         with patch(
-            "search_tool_provider.admin.app.Path.cwd", return_value=tmp_path
+            "search_tool_provider.admin.app._env_path", env_path
         ):
             resp = await client.post(
                 "/api/save-config",
@@ -144,10 +144,18 @@ class TestSaveConfig:
         assert data["success"] is True
         assert "SEARCH_PROVIDER" in data["keys"]
         assert "SERPER_API_KEY" in data["keys"]
+        # No path disclosure in response
+        assert "path" not in data
 
         # Verify os.environ was updated
         assert os.environ.get("SEARCH_PROVIDER") == "serper"
         assert os.environ.get("SERPER_API_KEY") == "sk-test-123"
+
+        # Verify file was written
+        assert env_path.exists()
+        content = env_path.read_text()
+        assert "SEARCH_PROVIDER=serper" in content
+        assert "SERPER_API_KEY=sk-test-123" in content
 
         # Clean up env
         os.environ.pop("SEARCH_PROVIDER", None)

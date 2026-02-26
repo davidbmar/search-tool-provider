@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 from pathlib import Path
 
 # Matches KEY=value lines (with optional export prefix and quoting)
 _KV_RE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+
+# Characters that require quoting in .env values
+_NEEDS_QUOTING = re.compile(r'[#\s\'"]')
+
+
+def _quote_value(value: str) -> str:
+    """Wrap value in double quotes if it contains spaces, #, or quotes."""
+    if _NEEDS_QUOTING.search(value):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return value
 
 
 def merge_env_file(path: str | Path, updates: dict[str, str]) -> Path:
@@ -17,6 +30,9 @@ def merge_env_file(path: str | Path, updates: dict[str, str]) -> Path:
       are preserved exactly.
     - If the file does not exist, it is created with one ``KEY=value`` line
       per entry in *updates*.
+    - Values containing spaces, ``#``, or quotes are automatically
+      double-quoted.
+    - Writes are atomic (temp file + rename) to prevent data loss.
 
     Returns the resolved Path that was written.
     """
@@ -36,7 +52,7 @@ def merge_env_file(path: str | Path, updates: dict[str, str]) -> Path:
                     ending = "\r\n"
                 elif line.endswith("\n"):
                     ending = "\n"
-                out.append(f"{key}={remaining.pop(key)}{ending}")
+                out.append(f"{key}={_quote_value(remaining.pop(key))}{ending}")
             else:
                 out.append(line)
 
@@ -46,12 +62,28 @@ def merge_env_file(path: str | Path, updates: dict[str, str]) -> Path:
             if out and not out[-1].endswith("\n"):
                 out.append("\n")
             for key, value in remaining.items():
-                out.append(f"{key}={value}\n")
+                out.append(f"{key}={_quote_value(value)}\n")
 
-        path.write_text("".join(out))
+        content = "".join(out)
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        lines_out = [f"{key}={value}\n" for key, value in updates.items()]
-        path.write_text("".join(lines_out))
+        lines_out = [f"{key}={_quote_value(value)}\n" for key, value in updates.items()]
+        content = "".join(lines_out)
+
+    # Atomic write: temp file in same directory, then rename
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".env.", suffix=".tmp")
+    try:
+        os.write(fd, content.encode())
+        os.close(fd)
+        fd = -1  # mark as closed
+        os.replace(tmp, path)
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
     return path

@@ -6,7 +6,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -21,17 +21,17 @@ _PROJECT_ROOT = _DIR.parent.parent.parent  # admin → search_tool_provider → 
 import logging
 _log = logging.getLogger("search_tool_provider.admin")
 
-_env_loaded = False
+_env_path: Path | None = None  # Track which .env we loaded (used by save-config)
 try:
     from dotenv import load_dotenv
     # Try project root first, then working directory
     for _candidate in [_PROJECT_ROOT / ".env", Path.cwd() / ".env"]:
         if _candidate.exists():
             load_dotenv(_candidate)
-            _env_loaded = True
+            _env_path = _candidate
             _log.info("Loaded .env from %s", _candidate)
             break
-    if not _env_loaded:
+    if _env_path is None:
         _log.info("No .env found (checked %s and cwd)", _PROJECT_ROOT)
 except ImportError:
     _log.info("python-dotenv not installed — skipping .env load")
@@ -41,17 +41,21 @@ templates = Jinja2Templates(directory=_DIR / "templates")
 
 _provider: SearchProvider | None = None
 _provider_name: str = ""
+_init_lock: asyncio.Lock | None = None  # created lazily to avoid event-loop issues
+
+
+def _get_init_lock() -> asyncio.Lock:
+    """Get or create the init lock (must be called from an async context)."""
+    global _init_lock
+    if _init_lock is None:
+        _init_lock = asyncio.Lock()
+    return _init_lock
 
 
 # ── Models ──────────────────────────────────────────────────────
 
-class ConnectionRequest(BaseModel):
-    provider: str
-    api_key: str = ""
-    cx: str = ""
-
-
-class SaveConfigRequest(BaseModel):
+class ProviderConfig(BaseModel):
+    """Shared model for test-connection, save-config, and any provider setup."""
     provider: str
     api_key: str = ""
     cx: str = ""
@@ -85,17 +89,19 @@ async def config_page(request: Request):
 async def api_status():
     global _provider
     if _provider is None:
-        # Try auto-loading
-        try:
-            _load_from_env()
-        except Exception:
-            return {
-                "configured": False,
-                "provider": "none",
-                "features": [],
-                "rate_limit_remaining": None,
-                "env_vars": _get_env_status(),
-            }
+        # Try auto-loading (with lock to prevent concurrent init)
+        async with _get_init_lock():
+            if _provider is None:
+                try:
+                    _load_from_env()
+                except Exception:
+                    return {
+                        "configured": False,
+                        "provider": "none",
+                        "features": [],
+                        "rate_limit_remaining": None,
+                        "env_vars": _get_env_status(),
+                    }
 
     info = await _provider.get_provider_info()
     return {
@@ -108,7 +114,7 @@ async def api_status():
 
 
 @app.post("/api/test-connection")
-async def api_test_connection(req: ConnectionRequest):
+async def api_test_connection(req: ProviderConfig):
     global _provider, _provider_name
     try:
         provider = _create_provider(req.provider, req.api_key, req.cx)
@@ -123,9 +129,7 @@ async def api_test_connection(req: ConnectionRequest):
 
 @app.get("/api/search")
 async def api_search(q: str, max_results: int = 10):
-    provider = _require_provider()
-    if isinstance(provider, dict):
-        return provider
+    provider = await _ensure_provider()
     resp = await provider.search(q, max_results=max_results)
     return {
         "results": [
@@ -271,11 +275,12 @@ async def api_health_check():
 
 
 @app.post("/api/save-config")
-async def api_save_config(req: SaveConfigRequest):
+async def api_save_config(req: ProviderConfig):
     """Merge provider config into .env and load into current process."""
     from .env_writer import merge_env_file
 
-    env_path = Path.cwd() / ".env"
+    # Use the same .env we loaded at startup, or fall back to cwd
+    env_path = _env_path or (Path.cwd() / ".env")
     updates: dict[str, str] = {"SEARCH_PROVIDER": req.provider}
 
     # Map provider → env var names (only include keys with values)
@@ -293,11 +298,11 @@ async def api_save_config(req: SaveConfigRequest):
             updates[env_var] = value
 
     try:
-        written = merge_env_file(env_path, updates)
+        merge_env_file(env_path, updates)
         # Load into current process so health panel picks up immediately
         for key, value in updates.items():
             os.environ[key] = value
-        return {"success": True, "path": str(written), "keys": list(updates.keys())}
+        return {"success": True, "keys": list(updates.keys())}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -322,21 +327,28 @@ def _load_from_env() -> None:
     global _provider, _provider_name
     from ..mcp.config import create_provider_from_env
     _provider = create_provider_from_env()
-    info_coro = _provider.get_provider_info()
-    # We're in an async context, but this is called from a sync path
-    # The provider is loaded — name will be set on first status call
-    _provider_name = "auto"
+    # Derive name from class (e.g. SerperProvider → "serper")
+    _provider_name = type(_provider).__name__.lower().replace("provider", "") or "auto"
 
 
-def _require_provider():
+async def _ensure_provider() -> SearchProvider:
+    """Return the active provider, auto-loading from env if needed.
+
+    Raises HTTPException(503) if no provider can be configured.
+    Uses a lock to prevent redundant concurrent initialization.
+    """
     global _provider
-    if _provider is None:
+    if _provider is not None:
+        return _provider
+    async with _get_init_lock():
+        if _provider is not None:  # double-check after acquiring lock
+            return _provider
         try:
             _load_from_env()
         except Exception:
             pass
     if _provider is None:
-        return {"error": "No provider configured. Run setup first."}
+        raise HTTPException(status_code=503, detail="No provider configured. Run setup first.")
     return _provider
 
 
@@ -361,11 +373,13 @@ def _kill_stale_server(port: int) -> None:
             ["lsof", "-ti", f":{port}"], text=True
         ).strip()
         if pids:
-            for pid in pids.splitlines():
-                pid = int(pid)
+            for pid_str in pids.splitlines():
+                pid = int(pid_str)
                 if pid != os.getpid():
                     os.kill(pid, signal.SIGTERM)
                     _log.info("Killed stale process %d on port %d", pid, port)
+    except FileNotFoundError:
+        _log.debug("lsof not found — skipping stale-server check (non-macOS?)")
     except (subprocess.CalledProcessError, OSError):
         pass  # No process on port — normal case
 
