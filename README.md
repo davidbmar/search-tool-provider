@@ -40,9 +40,25 @@ search-provider-admin
 # Open http://localhost:8200
 ```
 
-The wizard walks you through choosing a provider, entering credentials, running a test search, and generating config files.
+The 4-step wizard walks you through everything:
 
-**Option B — CLI** (fast, terminal-based):
+1. **Choose provider** — pick from 7 backends with pricing and use-case guidance
+2. **Enter credentials** — paste your API key (with direct signup links)
+3. **Test search** — run a live query to verify it works
+4. **Save config** — click **Save .env** to persist your keys (safe merge — never overwrites existing keys)
+
+![Step 1: Choose Provider](docs/screenshots/01-choose-provider.png)
+![Step 3: Test Search](docs/screenshots/03-test-search.png)
+![Step 4: Save Config](docs/screenshots/04-save-config.png)
+
+**Option B — Manual `.env`**:
+
+```bash
+cp .env.example .env
+# Edit .env — fill in your provider and API key
+```
+
+**Option C — CLI** (fast, terminal-based):
 
 ```bash
 pip install search-tool-provider[cli,duckduckgo]
@@ -280,11 +296,17 @@ search-provider-admin
 
 Features:
 - **Setup wizard** — 4-step guided setup with inline education about each provider
+- **Save .env** — one-click config persistence with safe merge (preserves existing keys)
 - **Search playground** — test queries, see results with scores
+- **Provider health** — live status of all providers with latency
 - **Provider comparison** — same query across all configured providers side-by-side
 - **Config generator** — .env, Claude Code, and Cursor config snippets
 
+![Dashboard](docs/screenshots/05-dashboard.png)
+
 Set port: `SEARCH_PROVIDER_ADMIN_PORT=9000 search-provider-admin`
+
+The server auto-loads `.env` on startup, kills stale processes on the same port, and logs which API keys were detected.
 
 ## Architecture
 
@@ -311,6 +333,7 @@ src/search_tool_provider/
     app.py                  Interactive CLI (rich)
   admin/
     app.py                  FastAPI admin + teaching wizard
+    env_writer.py           Safe .env merge logic
     templates/              Jinja2 templates
     static/                 CSS
 ```
@@ -329,7 +352,7 @@ src/search_tool_provider/
 [duckduckgo]  = ["duckduckgo-search>=6.0"]
 [google]      = ["google-api-python-client>=2.100"]
 [mcp]         = ["mcp[cli]>=1.0"]
-[admin]       = ["fastapi", "uvicorn", "jinja2", "python-multipart"]
+[admin]       = ["fastapi", "uvicorn", "jinja2", "python-multipart", "python-dotenv"]
 [cli]         = ["rich>=13.0"]
 [all]         = everything above
 ```
