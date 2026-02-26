@@ -73,8 +73,10 @@ async function runHealthCheck() {
             var left = document.createElement('div');
             left.className = 'provider-status-left';
 
+            // Dot color: green=ok, red=error, grey=not configured
             var dot = document.createElement('span');
-            dot.className = 'status-dot ' + (p.ok ? 'green' : 'red');
+            var dotColor = p.ok ? 'green' : (p.status === 'no_key' || p.status === 'not_installed') ? 'grey' : 'red';
+            dot.className = 'status-dot ' + dotColor;
             left.appendChild(dot);
 
             var nameSpan = document.createElement('span');
@@ -82,19 +84,23 @@ async function runHealthCheck() {
             nameSpan.textContent = p.provider;
             left.appendChild(nameSpan);
 
-            if (!p.ok && p.error) {
+            // Detail text for non-ok providers
+            if (!p.ok && p.detail) {
                 var detail = document.createElement('span');
                 detail.className = 'provider-status-detail';
-                detail.textContent = '  ' + p.error;
+                detail.textContent = p.detail;
                 detail.style.marginLeft = '0.75rem';
                 left.appendChild(detail);
             }
 
             row.appendChild(left);
 
+            // Right side: latency if pinged, or nothing for unconfigured
             var right = document.createElement('span');
             right.className = 'provider-status-latency';
-            right.textContent = p.latency_ms + 'ms';
+            if (p.latency_ms !== undefined) {
+                right.textContent = p.latency_ms + 'ms';
+            }
             row.appendChild(right);
 
             container.appendChild(row);

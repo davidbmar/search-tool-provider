@@ -153,31 +153,68 @@ async def api_compare(q: str):
 
 @app.get("/api/health-check")
 async def api_health_check():
-    """Ping every detectable provider with a quick test search, return status."""
+    """Show status of ALL providers — live ping configured ones, mark others unconfigured."""
     from ..providers.fallback import _ENV_KEYS
     from ..registry import get_provider
     import time
 
-    checks: list[tuple[str, SearchProvider]] = []
+    # All known providers with their env var and install requirement
+    ALL_PROVIDERS = [
+        ("duckduckgo", None, "duckduckgo-search"),
+        ("tavily", "TAVILY_API_KEY", None),
+        ("brave", "BRAVE_API_KEY", None),
+        ("serper", "SERPER_API_KEY", None),
+        ("bing", "BING_API_KEY", None),
+        ("google_cse", "GOOGLE_CSE_API_KEY", "google-api-python-client"),
+    ]
 
-    for name, env_key in _ENV_KEYS:
-        if os.environ.get(env_key):
+    to_ping: list[tuple[str, SearchProvider]] = []
+    unconfigured: list[dict] = []
+
+    for name, env_key, pkg in ALL_PROVIDERS:
+        if name == "duckduckgo":
+            # Check if library is installed
             try:
-                checks.append((name, get_provider(name)))
-            except Exception:
-                pass
-
-    try:
-        import duckduckgo_search  # noqa: F401
-        checks.append(("duckduckgo", get_provider("duckduckgo")))
-    except (ImportError, Exception):
-        pass
-
-    if os.environ.get("GOOGLE_CSE_API_KEY") and os.environ.get("GOOGLE_CSE_CX"):
-        try:
-            checks.append(("google_cse", get_provider("google_cse")))
-        except Exception:
-            pass
+                import duckduckgo_search  # noqa: F401
+                to_ping.append((name, get_provider(name)))
+            except ImportError:
+                unconfigured.append({
+                    "provider": name, "ok": False, "status": "not_installed",
+                    "detail": "pip install search-tool-provider[duckduckgo]",
+                })
+        elif name == "google_cse":
+            if os.environ.get("GOOGLE_CSE_API_KEY") and os.environ.get("GOOGLE_CSE_CX"):
+                try:
+                    to_ping.append((name, get_provider(name)))
+                except Exception as exc:
+                    unconfigured.append({
+                        "provider": name, "ok": False, "status": "error",
+                        "detail": str(exc),
+                    })
+            else:
+                missing = []
+                if not os.environ.get("GOOGLE_CSE_API_KEY"):
+                    missing.append("GOOGLE_CSE_API_KEY")
+                if not os.environ.get("GOOGLE_CSE_CX"):
+                    missing.append("GOOGLE_CSE_CX")
+                unconfigured.append({
+                    "provider": name, "ok": False, "status": "no_key",
+                    "detail": "Set " + " + ".join(missing),
+                })
+        else:
+            if os.environ.get(env_key):
+                try:
+                    to_ping.append((name, get_provider(name)))
+                except Exception as exc:
+                    unconfigured.append({
+                        "provider": name, "ok": False, "status": "error",
+                        "detail": str(exc),
+                    })
+            else:
+                unconfigured.append({
+                    "provider": name, "ok": False, "status": "no_key",
+                    "detail": "Set " + env_key,
+                })
 
     async def _check_one(name: str, prov: SearchProvider):
         t0 = time.monotonic()
@@ -187,20 +224,21 @@ async def api_health_check():
             return {
                 "provider": name,
                 "ok": True,
+                "status": "ok",
                 "latency_ms": latency,
-                "results": len(resp.results),
             }
         except Exception as exc:
             latency = round((time.monotonic() - t0) * 1000)
             return {
                 "provider": name,
                 "ok": False,
+                "status": "error",
                 "latency_ms": latency,
-                "error": str(exc),
+                "detail": str(exc),
             }
 
-    results = await asyncio.gather(*[_check_one(n, p) for n, p in checks])
-    return {"providers": list(results)}
+    pinged = list(await asyncio.gather(*[_check_one(n, p) for n, p in to_ping]))
+    return {"providers": pinged + unconfigured}
 
 
 # ── Helpers ─────────────────────────────────────────────────────
