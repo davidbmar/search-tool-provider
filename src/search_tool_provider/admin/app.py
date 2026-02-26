@@ -151,6 +151,58 @@ async def api_compare(q: str):
     return {"comparisons": list(comparisons)}
 
 
+@app.get("/api/health-check")
+async def api_health_check():
+    """Ping every detectable provider with a quick test search, return status."""
+    from ..providers.fallback import _ENV_KEYS
+    from ..registry import get_provider
+    import time
+
+    checks: list[tuple[str, SearchProvider]] = []
+
+    for name, env_key in _ENV_KEYS:
+        if os.environ.get(env_key):
+            try:
+                checks.append((name, get_provider(name)))
+            except Exception:
+                pass
+
+    try:
+        import duckduckgo_search  # noqa: F401
+        checks.append(("duckduckgo", get_provider("duckduckgo")))
+    except (ImportError, Exception):
+        pass
+
+    if os.environ.get("GOOGLE_CSE_API_KEY") and os.environ.get("GOOGLE_CSE_CX"):
+        try:
+            checks.append(("google_cse", get_provider("google_cse")))
+        except Exception:
+            pass
+
+    async def _check_one(name: str, prov: SearchProvider):
+        t0 = time.monotonic()
+        try:
+            resp = await prov.search("test", max_results=1)
+            latency = round((time.monotonic() - t0) * 1000)
+            return {
+                "provider": name,
+                "ok": True,
+                "latency_ms": latency,
+                "results": len(resp.results),
+            }
+        except Exception as exc:
+            latency = round((time.monotonic() - t0) * 1000)
+            return {
+                "provider": name,
+                "ok": False,
+                "latency_ms": latency,
+                "error": str(exc),
+            }
+
+    results = await asyncio.gather(*[_check_one(n, p) for n, p in checks])
+    return {"providers": list(results)}
+
+
 # ── Helpers ─────────────────────────────────────────────────────
 
 def _create_provider(name: str, api_key: str = "", cx: str = "") -> SearchProvider:

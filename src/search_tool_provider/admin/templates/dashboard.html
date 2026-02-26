@@ -11,9 +11,15 @@
         </div>
     </div>
 
-    <!-- Provider Info -->
-    <div id="provider-info" class="card mt-1">
-        <div class="text-dim">Loading provider info...</div>
+    <!-- Provider Health Panel -->
+    <div id="provider-health" class="card mt-1">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+            <h3>Provider Status</h3>
+            <button class="btn btn-sm btn-secondary" onclick="runHealthCheck()">Refresh</button>
+        </div>
+        <div id="health-rows">
+            <div class="text-dim">Checking providers...</div>
+        </div>
     </div>
 
     <!-- Search Results -->
@@ -32,36 +38,73 @@
 {% endblock %}
 {% block scripts %}
 <script>
-document.addEventListener('DOMContentLoaded', loadProviderInfo);
+document.addEventListener('DOMContentLoaded', runHealthCheck);
 
-async function loadProviderInfo() {
-    var div = document.getElementById('provider-info');
+async function runHealthCheck() {
+    var container = document.getElementById('health-rows');
+    while (container.firstChild) container.removeChild(container.firstChild);
+
+    // Show checking state
+    var checking = document.createElement('div');
+    checking.className = 'text-dim';
+    var spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    checking.appendChild(spinner);
+    checking.appendChild(document.createTextNode(' Pinging providers...'));
+    container.appendChild(checking);
+
     try {
-        var resp = await fetch('/api/status');
+        var resp = await fetch('/api/health-check');
         var data = await resp.json();
-        while (div.firstChild) div.removeChild(div.firstChild);
+        while (container.firstChild) container.removeChild(container.firstChild);
 
-        var title = document.createElement('h3');
-        title.textContent = 'Provider: ' + data.provider;
-        div.appendChild(title);
-
-        var details = document.createElement('div');
-        details.className = 'text-dim';
-        details.textContent = 'Features: ' + (data.features || []).join(', ');
-        div.appendChild(details);
-
-        if (data.rate_limit_remaining !== null && data.rate_limit_remaining !== undefined) {
-            var rl = document.createElement('div');
-            rl.className = 'text-dim mt-1';
-            rl.textContent = 'Rate limit remaining: ' + data.rate_limit_remaining;
-            div.appendChild(rl);
+        if (!data.providers || data.providers.length === 0) {
+            var none = document.createElement('div');
+            none.className = 'text-dim';
+            none.textContent = 'No providers configured. Run setup to add one.';
+            container.appendChild(none);
+            return;
         }
+
+        data.providers.forEach(function(p) {
+            var row = document.createElement('div');
+            row.className = 'provider-status-row';
+
+            var left = document.createElement('div');
+            left.className = 'provider-status-left';
+
+            var dot = document.createElement('span');
+            dot.className = 'status-dot ' + (p.ok ? 'green' : 'red');
+            left.appendChild(dot);
+
+            var nameSpan = document.createElement('span');
+            nameSpan.className = 'provider-status-name';
+            nameSpan.textContent = p.provider;
+            left.appendChild(nameSpan);
+
+            if (!p.ok && p.error) {
+                var detail = document.createElement('span');
+                detail.className = 'provider-status-detail';
+                detail.textContent = '  ' + p.error;
+                detail.style.marginLeft = '0.75rem';
+                left.appendChild(detail);
+            }
+
+            row.appendChild(left);
+
+            var right = document.createElement('span');
+            right.className = 'provider-status-latency';
+            right.textContent = p.latency_ms + 'ms';
+            row.appendChild(right);
+
+            container.appendChild(row);
+        });
     } catch (e) {
-        while (div.firstChild) div.removeChild(div.firstChild);
+        while (container.firstChild) container.removeChild(container.firstChild);
         var err = document.createElement('div');
         err.className = 'alert alert-error';
-        err.textContent = 'Failed to load provider info';
-        div.appendChild(err);
+        err.textContent = 'Health check failed: ' + e.message;
+        container.appendChild(err);
     }
 }
 
